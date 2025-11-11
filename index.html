@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>IR MQTT Remote</title>
+<style>
+  :root{--bg:#121212;--card:#1e1e1e;--accent:#00ffc3;--muted:#aaa}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#fff}
+  header{background:var(--card);padding:12px;display:flex;align-items:center}
+  #menuBtn{background:none;border:0;color:var(--accent);font-size:24px;margin-right:10px}
+  h1{color:var(--accent);font-size:18px;margin:0}
+  #sideMenu{position:fixed;top:0;left:-220px;width:200px;height:100%;background:#1b1b1b;padding-top:50px;transition:.25s;z-index:2}
+  #sideMenu button{width:100%;background:none;border:0;color:#fff;text-align:left;padding:12px 18px;font-size:15px}
+  #sideMenu button:hover{background:#009688}
+  .container{padding:14px;text-align:center}
+  .top-info{margin:8px 0 14px 0;color:#cfcfcf;font-size:13px}
+  .remote{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:340px;margin:10px auto}
+  .btn{background:#333;color:#fff;border:0;border-radius:50%;height:72px;width:72px;font-size:15px;box-shadow:0 2px 6px rgba(0,0,0,.5);transition:.12s}
+  .btn:hover{background:#00bfa5;cursor:pointer}
+  .action-btn{background:#444;border:0;color:#fff;padding:8px 12px;border-radius:6px;margin:6px}
+  .action-btn:hover{background:#00796b;cursor:pointer}
+  input,select,textarea{background:#333;color:#fff;border:0;border-radius:6px;padding:8px;margin:6px 4px}
+  .tab{display:block}
+  .hidden{display:none}
+  label{display:block;margin-top:8px;color:var(--accent)}
+  .edit-row{display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .small{font-size:13px;color:var(--muted)}
+  #log{max-width:640px;margin:8px auto;text-align:left;background:#0b0b0b;padding:8px;border-radius:6px;height:120px;overflow:auto;font-family:monospace;font-size:13px;color:#d6ffd8}
+  #toast{position:fixed;right:12px;bottom:12px;background:#222;padding:10px;border-radius:8px;color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.6);display:none}
+  footer{padding:10px;color:var(--muted);text-align:center;font-size:13px}
+  @media(max-width:420px){ .remote .btn{height:62px;width:62px;font-size:14px} }
+</style>
+</head>
+<body>
+<header>
+  <button id="menuBtn" onclick="toggleMenu()">☰</button>
+  <h1 id="controlTitle">Controle IR</h1>
+</header>
+
+<div id="sideMenu">
+  <button onclick="showTab('control')">🎮 Controle</button>
+  <button onclick="showTab('edit')">✏️ Editar Botões</button>
+  <button onclick="showTab('manual')">📡 Envio Manual</button>
+  <button onclick="showTab('mqtt')">⚙️ MQTT</button>
+</div>
+
+<div class="container">
+  <div class="top-info small">Use o botão MQTT para configurar broker (WSS) e tópico. Import/export compatível com o JSON do ESP.</div>
+
+  <!-- Controle -->
+  <div id="control" class="tab">
+    <div class="remote" id="btnContainer"></div>
+  </div>
+
+  <!-- Edit -->
+  <div id="edit" class="tab hidden">
+    <h3>Editar Botões</h3>
+    <label>Nome do Controle:</label>
+    <input id="ctrlName" placeholder="Meu Controle IR">
+    <div id="editContainer"></div>
+    <div style="margin-top:8px">
+      <button class="action-btn" onclick="addButton()">➕ Adicionar Botão</button>
+      <button class="action-btn" onclick="saveButtons()">💾 Salvar</button>
+      <button class="action-btn" onclick="resetButtons()">♻️ Padrão</button>
+    </div>
+
+    <hr style="border-color:#222">
+
+    <h4>Backup</h4>
+    <button class="action-btn" onclick="exportConfig()">📤 Exportar</button>
+    <input type="file" id="importFile" accept=".json" onchange="importConfig(event)" style="display:none">
+    <button class="action-btn" onclick="document.getElementById('importFile').click()">📥 Importar</button>
+  </div>
+
+  <!-- Manual -->
+  <div id="manual" class="tab hidden">
+    <h3>Envio Manual</h3>
+    <p>Protocolo:
+      <select id="proto"><option>NEC</option><option>SONY</option><option>RC5</option><option>RC6</option><option>RAW</option><option>GENERIC</option></select>
+    </p>
+    <p>Código: <input id="code" placeholder="ex: 0x20DF10EF ou 900,450,900,450"></p>
+    <p>Bits/Freq: <input id="bits" value="32" style="width:80px"></p>
+    <div>
+      <button class="action-btn" onclick="manualPublish()">📤 Publicar MQTT</button>
+      <span class="small">ou selecione a aba Controle para usar botões</span>
+    </div>
+  </div>
+
+  <!-- MQTT -->
+  <div id="mqtt" class="tab hidden">
+    <h3>Configurar MQTT (navegador)</h3>
+    <p class="small">Conexão via WebSocket Secure (WSS). Padrão: HiveMQ WSS `wss://broker.hivemq.com:8884/mqtt`</p>
+    <label>Broker WSS URL:</label>
+    <input id="mqttBroker" placeholder="wss://broker.hivemq.com:8884/mqtt" style="width:92%">
+    <label>Base topic (ex: iresp01/123abcd)</label>
+    <input id="mqttBaseTopic" placeholder="iresp01/123abcd" style="width:92%">
+    <label>Client ID (opcional)</label>
+    <input id="mqttClientId" placeholder="cliente-web-abc123" style="width:92%">
+    <div style="margin-top:8px">
+      <button class="action-btn" onclick="mqttConnect()">🔗 Conectar</button>
+      <button class="action-btn" onclick="mqttDisconnect()">⛔ Desconectar</button>
+    </div>
+    <div id="log" class="small">Log MQTT e mensagens aparecerão aqui...</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<footer>IR MQTT Remote — GitHub Pages version</footer>
+
+<!-- mqtt.js CDN -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script>
+const DEFAULT = {
+  name: "Controle IR",
+  buttons: [
+    {label:"Power", proto:"NEC", code:"0x20DF10EF", bits:32},
+    {label:"Vol +", proto:"NEC", code:"0x20DF40BF", bits:32},
+    {label:"Vol -", proto:"NEC", code:"0x20DFC03F", bits:32},
+    {label:"CH +", proto:"NEC", code:"0x20DF00FF", bits:32},
+    {label:"CH -", proto:"NEC", code:"0x20DF807F", bits:32},
+    {label:"Mute", proto:"NEC", code:"0x20DF906F", bits:32},
+    {label:"Menu", proto:"NEC", code:"0x20DF22DD", bits:32},
+    {label:"Input", proto:"NEC", code:"0x20DFD02F", bits:32},
+    {label:"1", proto:"NEC", code:"0x20DF8877", bits:32},
+    {label:"2", proto:"NEC", code:"0x20DF48B7", bits:32}
+  ]
+};
+let buttons=[], ctrlName="", client=null, connected=false;
+function toast(m,t=2500){const e=document.getElementById('toast');e.innerText=m;e.style.display='block';setTimeout(()=>e.style.display='none',t);}
+function log(m){const l=document.getElementById('log');l.innerText=new Date().toLocaleTimeString()+" — "+m+"\n"+l.innerText;}
+function toggleMenu(){const m=document.getElementById('sideMenu');m.style.left=(m.style.left==='0px')?'-220px':'0px';}
+function showTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.getElementById('sideMenu').style.left='-220px';}
+function loadData(){
+  try{buttons=JSON.parse(localStorage.getItem('irButtons'))||DEFAULT.buttons.slice();ctrlName=localStorage.getItem('ctrlName')||DEFAULT.name;}
+  catch(e){buttons=DEFAULT.buttons.slice();ctrlName=DEFAULT.name;}
+  document.getElementById('ctrlName').value=ctrlName;document.getElementById('controlTitle').innerText=ctrlName;
+  renderButtons();renderEdit();
+  ['mqttBroker','mqttBaseTopic','mqttClientId'].forEach(k=>{const v=localStorage.getItem(k);if(v)document.getElementById(k).value=v;});
+}
+function renderButtons(){const d=document.getElementById('btnContainer');d.innerHTML='';buttons.forEach(b=>{const bt=document.createElement('button');bt.className='btn';bt.textContent=b.label;bt.onclick=()=>publishButton(b);d.appendChild(bt);});}
+function renderEdit(){const c=document.getElementById('editContainer');c.innerHTML='';buttons.forEach((b,i)=>{c.innerHTML+=`<div class="edit-row"><input value="${b.label}" id="lbl${i}" style="width:90px"><input value="${b.proto}" id="p${i}" style="width:70px"><input value="${b.code}" id="c${i}" style="width:130px"><input value="${b.bits}" id="b${i}" style="width:60px"><button class="action-btn" onclick="removeButton(${i})">🗑</button></div>`});}
+function addButton(){if(buttons.length>=40){alert('Limite 40');return;}buttons.push({label:'Novo',proto:'NEC',code:'0x0',bits:32});renderEdit();}
+function removeButton(i){if(!confirm('Remover '+buttons[i].label+'?'))return;buttons.splice(i,1);renderEdit();renderButtons();}
+function saveButtons(){buttons=buttons.map((b,i)=>({label:document.getElementById('lbl'+i).value,proto:document.getElementById('p'+i).value,code:document.getElementById('c'+i).value,bits:parseInt(document.getElementById('b'+i).value)||32}));localStorage.setItem('irButtons',JSON.stringify(buttons));ctrlName=document.getElementById('ctrlName').value||'Controle IR';localStorage.setItem('ctrlName',ctrlName);document.getElementById('controlTitle').innerText=ctrlName;renderButtons();renderEdit();toast('Salvo');}
+function resetButtons(){if(!confirm('Restaurar padrão?'))return;buttons=DEFAULT.buttons.slice();ctrlName=DEFAULT.name;localStorage.setItem('irButtons',JSON.stringify(buttons));localStorage.setItem('ctrlName',ctrlName);document.getElementById('ctrlName').value=ctrlName;document.getElementById('controlTitle').innerText=ctrlName;renderButtons();renderEdit();toast('Padrão restaurado');}
+function exportConfig(){const data={name:ctrlName,buttons:buttons};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(ctrlName||'controle_ir')+'.json';a.click();URL.revokeObjectURL(url);}
+function importConfig(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);buttons=d.buttons||[];ctrlName=d.name;localStorage.setItem('irButtons',JSON.stringify(buttons));localStorage.setItem('ctrlName',ctrlName);document.getElementById('ctrlName').value=ctrlName;document.getElementById('controlTitle').innerText=ctrlName;renderEdit();renderButtons();toast('Importado');}catch(err){alert('Erro JSON: '+err);}};r.readAsText(f);}
+function mqttConnect(){
+  const broker=document.getElementById('mqttBroker').value.trim()||'wss://broker.hivemq.com:8884/mqtt';
+  const base=document.getElementById('mqttBaseTopic').value.trim();if(!base){alert('Informe Base Topic');return;}
+  const cid=document.getElementById('mqttClientId').value.trim()||'web-'+Math.random().toString(16).substr(2,8);
+  ['mqttBroker','mqttBaseTopic','mqttClientId'].forEach(k=>localStorage.setItem(k,document.getElementById(k).value));
+  try{
+    log('Conectando '+broker+'...');
+    client=mqtt.connect(broker,{clientId:cid,keepalive:30,reconnectPeriod:3000});
+    client.on('connect',()=>{connected=true;toast('MQTT conectado');log('Conectado!');client.subscribe(base+'/ack');client.subscribe(base+'/status');log('Subscrito em '+base+'/ack e '+base+'/status');});
+    client.on('message',(t,p)=>{const msg=p.toString();log('MSG '+t+' => '+msg);if(t===base+'/ack')toast('ACK: '+msg,3000);if(t===base+'/status')toast('STATUS: '+msg,3000);});
+    client.on('close',()=>{connected=false;log('MQTT desconectado');});
+    client.on('error',e=>log('Erro MQTT: '+e));
+  }catch(e){alert('Erro MQTT: '+e);}
+}
+function mqttDisconnect(){if(client){client.end();client=null;connected=false;log('Desconectado');toast('Desconectado');}}
+function publishToBaseTopic(payload){const base=document.getElementById('mqttBaseTopic').value.trim();if(!base){alert('Informe Base Topic');return;}if(!client||!connected){alert('MQTT não conectado');return;}client.publish(base+'/cmd',payload);log('PUB '+base+'/cmd => '+payload);}
+function publishButton(b){const payload=`${b.proto} ${b.code} ${b.bits}`;publishToBaseTopic(payload);toast('Enviado: '+b.label,1200);}
+function manualPublish(){const p=document.getElementById('proto').value.trim();const c=document.getElementById('code').value.trim();const b=document.getElementById('bits').value.trim()||'32';if(!p||!c){alert('Preencha protocolo e código');return;}publishToBaseTopic(`${p} ${c} ${b}`);toast('Manual enviado',1200);}
+loadData();showTab('control');
+</script>
+</body>
+</html>
