@@ -30,6 +30,26 @@
   #toast{position:fixed;right:12px;bottom:12px;background:#222;padding:10px;border-radius:8px;color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.6);display:none}
   footer{padding:10px;color:var(--muted);text-align:center;font-size:13px}
   @media(max-width:420px){ .remote .btn{height:62px;width:62px;font-size:14px} }
+  .status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  transition: background-color 0.3s ease;
+}
+
+.status-dot.online { background-color: #00ff6a; }
+.status-dot.offline { background-color: #ff3333; }
+
 </style>
 </head>
 <body>
@@ -46,8 +66,12 @@
 </div>
 
 <div class="container">
-  <div class="top-info small">Use o botão MQTT para configurar broker (WSS) e tópico. Import/export compatível com o JSON do ESP.</div>
-
+    <div id="statusBar" class="status-bar">
+    <span>Status do dispositivo: </span>
+    <span id="statusDot" class="status-dot offline"></span>
+    <span id="statusText">OFF</span>
+  </div>
+  
   <!-- Controle -->
   <div id="control" class="tab">
     <div class="remote" id="btnContainer"></div>
@@ -111,6 +135,19 @@
 <!-- mqtt.js CDN -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
+function updateStatus(connected) {
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  if (connected) {
+    dot.classList.remove('offline');
+    dot.classList.add('online');
+    text.textContent = 'ON';
+  } else {
+    dot.classList.remove('online');
+    dot.classList.add('offline');
+    text.textContent = 'OFF';
+  }
+}
 const DEFAULT = {
   name: "Controle IR",
   buttons: [
@@ -155,8 +192,8 @@ function mqttConnect(){
     log('Conectando '+broker+'...');
     client=mqtt.connect(broker,{clientId:cid,keepalive:30,reconnectPeriod:3000});
     client.on('connect',()=>{connected=true;toast('MQTT conectado');log('Conectado!');client.subscribe(base+'/ack');client.subscribe(base+'/status');log('Subscrito em '+base+'/ack e '+base+'/status');});
-    client.on('message',(t,p)=>{const msg=p.toString();log('MSG '+t+' => '+msg);if(t===base+'/ack')toast('ACK: '+msg,3000);if(t===base+'/status')toast('STATUS: '+msg,3000);});
-    client.on('close',()=>{connected=false;log('MQTT desconectado');});
+    client.on('message',(t,p)=>{const msg=p.toString();log('MSG '+t+' => '+msg);if(t===base+'/ack')toast('ACK: '+msg,3000);if(t===base+'/status'){toast('STATUS: '+msg,3000);updateStatus(msg.trim().toLowerCase() === 'online');}});
+    client.on('close',()=>{connected=false;updateStatus(false);log('MQTT desconectado');});
     client.on('error',e=>log('Erro MQTT: '+e));
   }catch(e){alert('Erro MQTT: '+e);}
 }
